@@ -292,6 +292,10 @@ def main_app():
                 
                 fig = go.Figure()
                 
+                # 科目名ごとにY軸の位置を計算
+                unique_subjects = sorted(set(s["subject"] for s in day_schedules))
+                subject_to_y = {subject: i for i, subject in enumerate(unique_subjects)}
+                
                 for schedule in day_schedules:
                     start_dt = datetime.combine(calendar_date, datetime.strptime(schedule["start_time"], "%H:%M:%S").time())
                     end_dt = start_dt + timedelta(minutes=schedule["duration"])
@@ -301,13 +305,28 @@ def main_app():
                     
                     fig.add_trace(go.Scatter(
                         x=[start_dt, end_dt],
-                        y=[schedule['subject'], schedule['subject']],
+                        y=[subject_to_y[schedule['subject']], subject_to_y[schedule['subject']]],
                         mode='lines+markers',
                         line=dict(color=color, width=30),
                         opacity=opacity,
                         name=schedule['subject'],
-                        showlegend=False
+                        showlegend=False,
+                        hovertext=f"{schedule['subject']}<br>{schedule['start_time']} - {datetime.strptime(schedule['start_time'], '%H:%M:%S') + timedelta(minutes=schedule['duration']):%H:%M}",
+                        hoverinfo='text'
                     ))
+                
+                fig.update_layout(
+                    title=f"{calendar_date}のスケジュール",
+                    xaxis_title="時間",
+                    yaxis_title="科目",
+                    yaxis=dict(
+                        tickmode='array',
+                        tickvals=list(subject_to_y.values()),
+                        ticktext=list(subject_to_y.keys())
+                    ),
+                    height=300,
+                    hovermode='closest'
+                )
                 
                 fig.update_layout(
                     title=f"{calendar_date}のスケジュール",
@@ -344,7 +363,19 @@ def main_app():
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            subject = st.text_input("科目名", value=st.session_state.timer_subject, placeholder="例: 数学")
+            # スケジュールから科目を取得
+            schedules = get_user_schedules(user.id)
+            subject_list = list(set(s["subject"] for s in schedules)) if schedules else []
+            
+            # ドロップダウンで科目を選択、または手動入力
+            subject = st.selectbox(
+                "科目名を選択",
+                options=subject_list + ["新しい科目を入力"],
+                index=len(subject_list) if st.session_state.timer_subject not in subject_list else subject_list.index(st.session_state.timer_subject)
+            )
+            
+            if subject == "新しい科目を入力":
+                subject = st.text_input("新しい科目名", value=st.session_state.timer_subject, placeholder="例: 数学")
         
         with col2:
             if not st.session_state.timer_running:
@@ -450,7 +481,19 @@ def main_app():
         with st.form("manual_session_form"):
             col1, col2 = st.columns(2)
             with col1:
-                manual_subject = st.text_input("科目名", placeholder="例: 英語")
+                # スケジュールから科目を取得
+                schedules = get_user_schedules(user.id)
+                subject_list = list(set(s["subject"] for s in schedules)) if schedules else []
+                
+                # ドロップダウンで科目を選択、または手動入力
+                manual_subject = st.selectbox(
+                    "科目名を選択",
+                    options=subject_list + ["新しい科目を入力"],
+                    key="manual_subject_select"
+                )
+                
+                if manual_subject == "新しい科目を入力":
+                    manual_subject = st.text_input("新しい科目名", placeholder="例: 英語", key="manual_subject_input")
             with col2:
                 manual_date = st.date_input("日付", datetime.now())
             
@@ -594,29 +637,26 @@ def main_app():
         
         today = date.today()
         
-        # 今日のスケジュール
-        today_schedules = [
-            s for s in schedules
-            if datetime.strptime(s["date"], "%Y-%m-%d").date() == today
-        ]
-        
         # 今日の学習記録
         today_sessions = [
             s for s in sessions
             if datetime.strptime(s["date"], "%Y-%m-%d").date() == today
         ]
         
-        # スケジュール完了率
-        if today_schedules:
-            completed_count = sum(1 for s in today_schedules if s["completed"])
-            completion_rate = (completed_count / len(today_schedules)) * 100
-            st.metric("スケジュール完了率", f"{completion_rate:.1f}%")
-            st.progress(completion_rate / 100)
-            st.caption(f"{completed_count}/{len(today_schedules)} 完了")
+        # 進捗の平均
+        if today_sessions:
+            avg_progress = sum(s["progress"] for s in today_sessions) / len(today_sessions)
+            st.metric("平均進捗率", f"{avg_progress:.1f}%")
+            st.progress(avg_progress / 100)
+            st.caption(f"{len(today_sessions)}件の記録")
         else:
-            st.info("今日のスケジュールはありません")
+            st.info("今日の学習記録はありません")
         
         # 予定 vs 実績
+        today_schedules = [
+            s for s in schedules
+            if datetime.strptime(s["date"], "%Y-%m-%d").date() == today
+        ]
         scheduled_minutes = sum(s["duration"] for s in today_schedules)
         actual_minutes = sum(s["duration"] for s in today_sessions)
         
@@ -715,35 +755,50 @@ def main_app():
         if all_data:
             fig = go.Figure()
             
+            # 科目名を抽出（絵文字を除く）
+            all_subjects = list(set(item["Task"].split(" ")[1] if " " in item["Task"] else item["Task"] for item in all_data))
+            subject_to_y = {subject: i for i, subject in enumerate(sorted(all_subjects))}
+            
             # 予定を追加（青色）
             for item in schedule_data:
+                subject = item["Task"].split(" ")[1] if " " in item["Task"] else item["Task"]
                 fig.add_trace(go.Scatter(
                     x=[item["Start"], item["Finish"]],
-                    y=[item["Task"], item["Task"]],
+                    y=[subject_to_y[subject], subject_to_y[subject]],
                     mode='lines+markers',
                     line=dict(color='blue', width=20),
                     name='予定',
                     legendgroup='予定',
-                    showlegend=len(schedule_data) > 0
+                    showlegend=len(schedule_data) > 0,
+                    hovertext=f"{item['Task']}<br>{item['Start'].strftime('%H:%M')} - {item['Finish'].strftime('%H:%M')}",
+                    hoverinfo='text'
                 ))
             
             # 実績を追加（緑色）
             for item in session_data:
+                subject = item["Task"].split(" ")[1] if " " in item["Task"] else item["Task"]
                 fig.add_trace(go.Scatter(
                     x=[item["Start"], item["Finish"]],
-                    y=[item["Task"], item["Task"]],
+                    y=[subject_to_y[subject], subject_to_y[subject]],
                     mode='lines+markers',
                     line=dict(color='green', width=20),
                     opacity=0.7,
                     name='実績',
                     legendgroup='実績',
-                    showlegend=len(session_data) > 0
+                    showlegend=len(session_data) > 0,
+                    hovertext=f"{item['Task']}<br>{item['Start'].strftime('%H:%M')} - {item['Finish'].strftime('%H:%M')}",
+                    hoverinfo='text'
                 ))
             
             fig.update_layout(
                 title=f"{selected_date}の予定 vs 実績",
                 xaxis_title="時間",
                 yaxis_title="科目",
+                yaxis=dict(
+                    tickmode='array',
+                    tickvals=list(subject_to_y.values()),
+                    ticktext=list(subject_to_y.keys())
+                ),
                 height=400,
                 hovermode='closest'
             )
