@@ -19,6 +19,13 @@ if not supabase_url or not supabase_key:
 
 supabase: Client = create_client(supabase_url, supabase_key)
 
+# 認証トークンを設定する関数
+def set_auth_token(access_token, refresh_token=None):
+    if refresh_token:
+        supabase.auth.set_session(access_token, refresh_token)
+    else:
+        supabase.auth.set_session(access_token, access_token)
+
 # ページ設定
 st.set_page_config(
     page_title="学習サポートアプリ",
@@ -56,7 +63,16 @@ def signup_page():
                 "email": email,
                 "password": password
             })
-            st.success("登録メールを送信しました。メールを確認してください。")
+            if response.user:
+                st.session_state.user = response.user
+                if response.session:
+                    st.session_state.access_token = response.session.access_token
+                    set_auth_token(response.session.access_token)
+                st.session_state.page = "main"
+                st.success("登録しました！")
+                st.rerun()
+            else:
+                st.success("登録メールを送信しました。メールを確認してください。")
         except Exception as e:
             st.error(f"登録に失敗しました: {str(e)}")
     
@@ -79,6 +95,8 @@ def login_page():
                 "password": password
             })
             st.session_state.user = response.user
+            st.session_state.access_token = response.session.access_token
+            set_auth_token(response.session.access_token)
             st.session_state.page = "main"
             st.success("ログインしました！")
             st.rerun()
@@ -94,6 +112,7 @@ def login_page():
 def logout():
     supabase.auth.sign_out()
     st.session_state.user = None
+    st.session_state.access_token = None
     st.session_state.page = "login"
     st.rerun()
 
@@ -648,9 +667,12 @@ if 'user' not in st.session_state:
 
 # セッション有効性の確認
 try:
-    supabase.auth.get_user()
+    user = supabase.auth.get_user()
+    if user and 'access_token' in st.session_state:
+        set_auth_token(st.session_state.access_token)
 except:
     st.session_state.user = None
+    st.session_state.access_token = None
     st.session_state.page = "login"
 
 # ページのルーティング
