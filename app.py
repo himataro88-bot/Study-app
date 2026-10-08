@@ -303,7 +303,8 @@ def main_app():
                         x=[start_dt, end_dt],
                         y=[schedule['subject'], schedule['subject']],
                         mode='lines+markers',
-                        line=dict(color=color, width=30, opacity=opacity),
+                        line=dict(color=color, width=30),
+                        opacity=opacity,
                         name=schedule['subject'],
                         showlegend=False
                     ))
@@ -732,7 +733,8 @@ def main_app():
                     x=[item["Start"], item["Finish"]],
                     y=[item["Task"], item["Task"]],
                     mode='lines+markers',
-                    line=dict(color='green', width=20, opacity=0.7),
+                    line=dict(color='green', width=20),
+                    opacity=0.7,
                     name='実績',
                     legendgroup='実績',
                     showlegend=len(session_data) > 0
