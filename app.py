@@ -277,6 +277,49 @@ def main_app():
             schedules_df['date'] = pd.to_datetime(schedules_df['date'])
             schedules_df = schedules_df.sort_values('date')
             
+            # カレンダー風表示
+            st.subheader("📅 カレンダービュー")
+            calendar_date = st.date_input("表示する日付", datetime.now(), key="calendar_date")
+            
+            day_schedules = [
+                s for s in schedules
+                if datetime.strptime(s["date"], "%Y-%m-%d").date() == calendar_date
+            ]
+            
+            if day_schedules:
+                # 時間軸表示
+                import plotly.graph_objects as go
+                
+                fig = go.Figure()
+                
+                for schedule in day_schedules:
+                    start_dt = datetime.combine(calendar_date, datetime.strptime(schedule["start_time"], "%H:%M:%S").time())
+                    end_dt = start_dt + timedelta(minutes=schedule["duration"])
+                    
+                    color = 'green' if schedule["completed"] else 'blue'
+                    opacity = 0.5 if schedule["completed"] else 0.8
+                    
+                    fig.add_trace(go.Scatter(
+                        x=[start_dt, end_dt],
+                        y=[schedule['subject'], schedule['subject']],
+                        mode='lines+markers',
+                        line=dict(color=color, width=30, opacity=opacity),
+                        name=schedule['subject'],
+                        showlegend=False
+                    ))
+                
+                fig.update_layout(
+                    title=f"{calendar_date}のスケジュール",
+                    xaxis_title="時間",
+                    yaxis_title="科目",
+                    height=300,
+                    hovermode='closest'
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # リスト表示
+            st.subheader("📋 リスト表示")
             for idx, row in schedules_df.iterrows():
                 with st.expander(f"{row['date'].strftime('%Y/%m/%d')} - {row['subject']} ({row['duration']}分)"):
                     col1, col2 = st.columns([3, 1])
@@ -542,12 +585,57 @@ def main_app():
     elif page == "📊 ダッシュボード":
         st.header("📊 学習ダッシュボード")
         
+        # 今日の達成率サマリー
+        st.subheader("📅 今日の達成率")
+        
+        schedules = get_user_schedules(user.id)
         sessions = get_user_sessions(user.id)
+        
+        today = date.today()
+        
+        # 今日のスケジュール
+        today_schedules = [
+            s for s in schedules
+            if datetime.strptime(s["date"], "%Y-%m-%d").date() == today
+        ]
+        
+        # 今日の学習記録
+        today_sessions = [
+            s for s in sessions
+            if datetime.strptime(s["date"], "%Y-%m-%d").date() == today
+        ]
+        
+        # スケジュール完了率
+        if today_schedules:
+            completed_count = sum(1 for s in today_schedules if s["completed"])
+            completion_rate = (completed_count / len(today_schedules)) * 100
+            st.metric("スケジュール完了率", f"{completion_rate:.1f}%")
+            st.progress(completion_rate / 100)
+            st.caption(f"{completed_count}/{len(today_schedules)} 完了")
+        else:
+            st.info("今日のスケジュールはありません")
+        
+        # 予定 vs 実績
+        scheduled_minutes = sum(s["duration"] for s in today_schedules)
+        actual_minutes = sum(s["duration"] for s in today_sessions)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("予定学習時間", f"{scheduled_minutes}分")
+        with col2:
+            st.metric("実績学習時間", f"{actual_minutes}分")
+        with col3:
+            diff = actual_minutes - scheduled_minutes
+            st.metric("差分", f"{diff:+d}分")
+        
+        st.markdown("---")
+        
+        # 科目別統計
+        st.subheader("科目別学習時間")
         if sessions:
             sessions_df = pd.DataFrame(sessions)
             sessions_df['date'] = pd.to_datetime(sessions_df['date'])
             
-            st.subheader("科目別学習時間")
             subject_stats = sessions_df.groupby('subject')['duration'].sum().sort_values(ascending=False)
             
             col1, col2 = st.columns(2)
@@ -573,11 +661,102 @@ def main_app():
         
         selected_date = st.date_input("比較する日付", datetime.now())
         
+        st.subheader("📅 時間軸ビュー")
+        
+        schedules = get_user_schedules(user.id)
+        sessions = get_user_sessions(user.id)
+        
+        # 予定データを準備
+        schedule_data = []
+        if schedules:
+            day_schedules = [
+                s for s in schedules
+                if datetime.strptime(s["date"], "%Y-%m-%d").date() == selected_date
+            ]
+            for schedule in day_schedules:
+                start_dt = datetime.combine(selected_date, datetime.strptime(schedule["start_time"], "%H:%M:%S").time())
+                end_dt = start_dt + timedelta(minutes=schedule["duration"])
+                schedule_data.append({
+                    "Task": f"📅 {schedule['subject']}",
+                    "Start": start_dt,
+                    "Finish": end_dt,
+                    "Type": "予定",
+                    "Completed": schedule["completed"]
+                })
+        
+        # 実績データを準備
+        session_data = []
+        if sessions:
+            day_sessions = [
+                s for s in sessions
+                if datetime.strptime(s["date"], "%Y-%m-%d").date() == selected_date
+            ]
+            for session in day_sessions:
+                if 'start_time' in session and session['start_time']:
+                    start_dt = datetime.combine(selected_date, datetime.strptime(session["start_time"], "%H:%M:%S").time())
+                    if 'end_time' in session and session['end_time']:
+                        end_dt = datetime.combine(selected_date, datetime.strptime(session["end_time"], "%H:%M:%S").time())
+                    else:
+                        end_dt = start_dt + timedelta(minutes=session["duration"])
+                    session_data.append({
+                        "Task": f"⏱️ {session['subject']}",
+                        "Start": start_dt,
+                        "Finish": end_dt,
+                        "Type": "実績"
+                    })
+        
+        # Plotlyでガントチャートを表示
+        import plotly.express as px
+        import plotly.graph_objects as go
+        
+        all_data = schedule_data + session_data
+        
+        if all_data:
+            fig = go.Figure()
+            
+            # 予定を追加（青色）
+            for item in schedule_data:
+                fig.add_trace(go.Scatter(
+                    x=[item["Start"], item["Finish"]],
+                    y=[item["Task"], item["Task"]],
+                    mode='lines+markers',
+                    line=dict(color='blue', width=20),
+                    name='予定',
+                    legendgroup='予定',
+                    showlegend=len(schedule_data) > 0
+                ))
+            
+            # 実績を追加（緑色）
+            for item in session_data:
+                fig.add_trace(go.Scatter(
+                    x=[item["Start"], item["Finish"]],
+                    y=[item["Task"], item["Task"]],
+                    mode='lines+markers',
+                    line=dict(color='green', width=20, opacity=0.7),
+                    name='実績',
+                    legendgroup='実績',
+                    showlegend=len(session_data) > 0
+                ))
+            
+            fig.update_layout(
+                title=f"{selected_date}の予定 vs 実績",
+                xaxis_title="時間",
+                yaxis_title="科目",
+                height=400,
+                hovermode='closest'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info(f"{selected_date}のデータがありません")
+        
+        st.markdown("---")
+        
+        # 詳細リスト表示
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("📅 予定タイムライン")
-            schedules = get_user_schedules(user.id)
             if schedules:
                 day_schedules = [
                     s for s in schedules
@@ -601,7 +780,6 @@ def main_app():
         
         with col2:
             st.subheader("⏱️ 実績タイムライン")
-            sessions = get_user_sessions(user.id)
             if sessions:
                 day_sessions = [
                     s for s in sessions
