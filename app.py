@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import os
 import time
 from dotenv import load_dotenv
@@ -453,11 +453,16 @@ def main_app():
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.form_submit_button("保存"):
+                        # UTCからローカルタイムに変換（日本時間: UTC+9）
+                        utc_now = datetime.now(timezone.utc)
+                        jst_now = utc_now + timedelta(hours=9)
+                        start_time = jst_now - timedelta(seconds=st.session_state.timer_stopped_duration)
+                        
                         new_session = {
                             "subject": st.session_state.timer_subject,
-                            "date": str(date.today()),
-                            "start_time": datetime.fromtimestamp(time.time() - st.session_state.timer_stopped_duration).strftime("%H:%M:%S"),
-                            "end_time": datetime.now().strftime("%H:%M:%S"),
+                            "date": str(jst_now.date()),
+                            "start_time": start_time.strftime("%H:%M:%S"),
+                            "end_time": jst_now.strftime("%H:%M:%S"),
                             "duration": int(st.session_state.timer_stopped_duration / 60),
                             "progress": progress,
                             "notes": notes if notes else "タイマーからの記録"
