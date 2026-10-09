@@ -243,11 +243,74 @@ def main_app():
     if page == "📅 スケジュール管理":
         st.header("📅 学習スケジュール管理")
         
+        # 現在の予定を表示
+        st.subheader("📍 現在の予定")
+        schedules = get_user_schedules(user.id)
+        
+        if schedules:
+            # 日本時間を取得
+            utc_now = datetime.now(timezone.utc)
+            jst_now = utc_now + timedelta(hours=9)
+            today = jst_now.date()
+            current_time = jst_now.time()
+            
+            # 今日のスケジュールを取得
+            today_schedules = [
+                s for s in schedules
+                if datetime.strptime(s["date"], "%Y-%m-%d").date() == today
+            ]
+            
+            # 現在の時間を含むスケジュールを探す
+            current_schedule = None
+            for schedule in today_schedules:
+                start_time = datetime.strptime(schedule["start_time"], "%H:%M:%S").time()
+                end_time = (datetime.strptime(schedule["start_time"], "%H:%M:%S") + 
+                          timedelta(minutes=schedule["duration"])).time()
+                
+                if start_time <= current_time <= end_time:
+                    current_schedule = schedule
+                    break
+            
+            if current_schedule:
+                st.success(f"📚 {current_schedule['subject']} を勉強中")
+                st.info(f"⏰ {current_schedule['start_time']} - {(datetime.strptime(current_schedule['start_time'], '%H:%M:%S') + timedelta(minutes=current_schedule['duration'])).strftime('%H:%M')}")
+                if current_schedule["notes"]:
+                    st.caption(f"📝 メモ: {current_schedule['notes']}")
+            else:
+                # 次のスケジュールを探す
+                upcoming_schedules = [
+                    s for s in today_schedules
+                    if datetime.strptime(s["start_time"], "%H:%M:%S").time() > current_time
+                ]
+                if upcoming_schedules:
+                    next_schedule = min(upcoming_schedules, key=lambda s: datetime.strptime(s["start_time"], "%H:%M:%S").time())
+                    st.info(f"⏭️ 次の予定: {next_schedule['subject']} ({next_schedule['start_time']}開始)")
+                    if next_schedule["notes"]:
+                        st.caption(f"📝 メモ: {next_schedule['notes']}")
+                else:
+                    st.info("🎉 今日のスケジュールはすべて完了しました！")
+        else:
+            st.info("スケジュールがまだありません")
+        
+        st.markdown("---")
+        
         st.subheader("新しいスケジュールを追加")
         with st.form("schedule_form"):
+            # 既存のスケジュールから科目を取得
+            existing_schedules = get_user_schedules(user.id)
+            subject_list = list(set(s["subject"] for s in existing_schedules)) if existing_schedules else []
+            
             col1, col2, col3 = st.columns(3)
             with col1:
-                subject = st.text_input("科目名", placeholder="例: 数学")
+                # ドロップダウンで科目を選択、または手動入力
+                subject = st.selectbox(
+                    "科目名を選択",
+                    options=subject_list + ["新しい科目を入力"],
+                    key="schedule_subject_select"
+                )
+                
+                if subject == "新しい科目を入力":
+                    subject = st.text_input("新しい科目名", placeholder="例: 数学", key="schedule_subject_input")
             with col2:
                 study_date = st.date_input("日付", datetime.now())
             with col3:
@@ -433,7 +496,10 @@ def main_app():
                     
                     st.markdown(f"<h1 style='text-align: center; font-size: 80px; color: #4CAF50;'>{time_str}</h1>", unsafe_allow_html=True)
                     
-                    current_time = datetime.now().strftime("%H:%M:%S")
+                    # 日本時間を表示
+                    utc_now = datetime.now(timezone.utc)
+                    jst_now = utc_now + timedelta(hours=9)
+                    current_time = jst_now.strftime("%H:%M:%S")
                     st.markdown(f"<h3 style='text-align: center; color: #666;'>現在時刻: {current_time}</h3>", unsafe_allow_html=True)
                     
                     st.markdown(f"<p style='text-align: center; font-size: 20px;'>科目: {st.session_state.timer_subject}</p>", unsafe_allow_html=True)
